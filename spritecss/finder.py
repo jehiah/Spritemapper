@@ -61,6 +61,7 @@ def iter_spriterefed(evs, conf=None, source=None, root=None):
         raise TypeError("specify at least source or root")
 
     if conf:
+        logging.info(conf.__dict__)
         normpath = conf.normpath
     else:
         normpath = CSSConfig(root=root).normpath

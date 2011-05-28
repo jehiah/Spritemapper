@@ -1,5 +1,6 @@
 import shlex
 from os import path
+import logging
 from itertools import imap, ifilter
 from urlparse import urljoin
 from .css import CSSParser, iter_events
@@ -20,12 +21,18 @@ def iter_css_config(parser):
 
 class CSSConfig(object):
     def __init__(self, parser=None, base=None, root=None, fname=None):
-        if fname and root is None:
-            root = path.dirname(fname)
-        self.root = root
+        # if fname and root is None:
+        #     root = path.dirname(fname)
+        # self.root = root
         self._data = dict(base) if base else {}
         if parser is not None:
             self._data.update(iter_css_config(parser))
+        self.file_mappings = {}
+        self.url_mappings = {}
+        if self._data.get('file_map'):
+            self.file_mappings = dict([x.split(':',1) for x in self._data.get('file_map').split('|')])
+        if self._data.get('url_map'):
+            self.url_mappings = dict([x.split(':',1) for x in self._data.get('url_map').split('|')])
 
     def __iter__(self):
         # this is mostly so you can go CSSConfig(base=CSSConfig(..))
@@ -36,8 +43,22 @@ class CSSConfig(object):
         with open(fname, "rb") as fp:
             return cls(CSSParser.from_file(fp), fname=fname)
 
+    
     def normpath(self, p):
         """Normalize a possibly relative path *p* to the root."""
+        # hack for issue #10 (Skip unsupported filetypes)
+        for unsupported_type in ['.gif', '.jpg']:
+            if p.endswith(unsupported_type):
+                return '/tmp/unsuported_file_type/' + p
+
+        # apply url -> file mappings
+        # this is useful for pointing url paths to real file paths. ie: render urls as /s/graphics/this.png but the file is at /static/graphics/this.png
+        for from_url, to_url in self.file_mappings.items():
+            if p.startswith(from_url):
+                p = to_url + p[len(from_url):]
+        if p.startswith('/'):
+            return self.root + p
+        logging.info(p)
         return path.normpath(path.join(self.root, p))
 
     def absurl(self, p):
@@ -46,6 +67,10 @@ class CSSConfig(object):
         if base:
             p = urljoin(base, p)
         return p
+
+    @property
+    def root(self):
+        return self._data.get("root")
 
     @property
     def base_url(self):
@@ -93,7 +118,11 @@ class CSSConfig(object):
 
     def get_spritemap_url(self, fname):
         "Get output image URL for spritemap *fname*."
-        return self.absurl(path.relpath(fname, self.root))
+        p = self.absurl(path.relpath(fname, self.root))
+        for from_url, to_url in self.url_mappings.items():
+            if p.startswith(from_url):
+                p = to_url + p[len(from_url):]
+        return p
 
     def get_css_out(self, fname):
         "Get output image filename for spritemap directory *fname*."
